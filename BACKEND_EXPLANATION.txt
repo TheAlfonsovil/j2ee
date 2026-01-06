@@ -1,0 +1,876 @@
+================================================================================
+                    J2EE SPRING BOOT BACKEND - EXPLICACIÓN COMPLETA
+                          Para Entrevistas Técnicas
+================================================================================
+
+TABLA DE CONTENIDOS
+1. Visión General de la Arquitectura
+2. Tecnologías Utilizadas
+3. Flujo de Autenticación JWT
+4. Estructura de Capas
+5. Explicación Detallada de Cada Componente
+6. Cómo Explicarlo en una Entrevista
+7. Preguntas Comunes y Respuestas
+
+================================================================================
+1. VISIÓN GENERAL DE LA ARQUITECTURA
+================================================================================
+
+Este es un backend empresarial J2EE (Java Enterprise Edition) construido con
+Spring Boot 3.2.1 que proporciona:
+
+✓ Autenticación y Autorización con JWT (JSON Web Tokens)
+✓ Base de datos relacional con PostgreSQL y Hibernate/JPA
+✓ Control de roles (USER y ADMIN)
+✓ Auditoría de cambios en entidades
+✓ Logging de acciones de usuarios
+✓ CORS habilitado para Angular frontend
+✓ Documentación automática con Swagger/OpenAPI
+✓ Validación de entrada con Bean Validation
+✓ Manejo global de excepciones
+
+Patrón Arquitectónico: Arquitectura de Capas (Layered Architecture)
+- Capa de Presentación (Controllers)
+- Capa de Lógica de Negocio (Services)
+- Capa de Acceso a Datos (Repositories)
+- Capa de Seguridad (Security Components)
+
+================================================================================
+2. TECNOLOGÍAS UTILIZADAS
+================================================================================
+
+FRAMEWORK PRINCIPAL:
+├─ Spring Boot 3.2.1 (Framework empresarial Java moderno)
+│  ├─ Spring Security 6.2.1 (Autenticación y autorización)
+│  ├─ Spring Data JPA (Acceso a datos)
+│  └─ Spring Validation (Validación de datos)
+│
+DATABASE:
+├─ PostgreSQL 16.11 (Base de datos relacional)
+├─ Hibernate 6.4.1 (ORM - Object-Relational Mapping)
+├─ HikariCP (Connection pooling para optimizar conexiones)
+└─ Flyway 9.22.3 (Versionado y migración de esquema de BD)
+│
+SEGURIDAD:
+├─ JWT (JSON Web Tokens) - tokens sin estado
+├─ BCrypt - hashing criptográfico de contraseñas
+├─ JJWT 0.12.3 - librería para crear y validar JWTs
+└─ CORS - para comunicación con frontend Angular
+│
+UTILIDADES:
+├─ Lombok 1.18.30 (Reduce boilerplate: getters, setters, constructores)
+├─ MapStruct 1.5.5.Final (Mapeo automático entre Entity y DTO)
+├─ SpringDoc OpenAPI 2.3.0 (Documentación Swagger/OpenAPI)
+├─ Jakarta Persistence 3.1.0 (JPA estándar)
+└─ SLF4J + Logback (Logging)
+
+BUILD:
+└─ Maven 3.x (Gestor de dependencias y build)
+
+================================================================================
+3. FLUJO DE AUTENTICACIÓN JWT (Paso a Paso)
+================================================================================
+
+FLUJO DE LOGIN:
+━━━━━━━━━━━━━━━━━
+
+1. Usuario envía credenciales (username/password)
+   POST /api/auth/login
+   {
+     "username": "admin",
+     "password": "1234"
+   }
+
+2. AuthController recibe la solicitud
+   └─> AuthService.login(LoginRequest) procesa
+
+3. AuthService hace:
+   a) Autentica con AuthenticationManager
+      - Busca usuario en BD por username
+      - Valida que la contraseña coincida (BCrypt)
+      - Si es correcto, crea Authentication object
+   
+   b) Genera JWT token (con JwtTokenProvider)
+      - Subject: userId
+      - Claims: username, roles
+      - Firmado con HMAC-SHA256
+      - Expira en 24 horas
+   
+   c) Crea Refresh Token
+      - Token aleatorio de UUID
+      - Guardado en BD con expiry (7 días)
+      - Se usa para renovar access token
+   
+   d) Registra acción en auditoría
+      - Crea AuditLog con LOGIN action
+      - Guarda timestamp, IP, usuario, etc.
+
+4. Respuesta al cliente
+   {
+     "accessToken": "eyJhbGci...",
+     "refreshToken": "uuid-token",
+     "userId": 2,
+     "username": "admin",
+     "roles": ["ROLE_ADMIN"]
+   }
+
+5. Cliente (Angular) almacena tokens en localStorage
+
+FLUJO DE REQUESTS PROTEGIDOS (Cómo llega el JWT):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Frontend envía request con header
+   GET /api/admin/users
+   Authorization: Bearer eyJhbGci...
+
+2. Spring recibe request
+   ├─> CorsFilter: Valida origen CORS
+   └─> JwtAuthenticationFilter (OncePerRequestFilter)
+       ├─ Extrae JWT del header "Authorization"
+       ├─ Valida firma del JWT (getSigningKey())
+       ├─ Extrae userId del subject
+       ├─ Carga UserDetails de BD con CustomUserDetailsService
+       ├─ Crea UsernamePasswordAuthenticationToken
+       ├─ Guarda en SecurityContextHolder
+       └─ Pasa al siguiente filtro
+
+3. Request llega a SecurityFilterChain
+   ├─> @PreAuthorize("hasRole('ADMIN')") intercepta
+   ├─> Verifica que authentication.roles contiene ROLE_ADMIN
+   └─> Si no tiene el rol → 403 Forbidden
+
+4. Si tiene rol, llega a AdminController.getAllUsers()
+   └─> Ejecuta la lógica del endpoint
+
+5. Response retorna al cliente
+
+FLUJO DE REFRESH TOKEN:
+━━━━━━━━━━━━━━━━━━━━━
+
+1. Access token expira (24 horas)
+2. Frontend detecta error 401
+3. Frontend envía refresh token
+   POST /api/auth/refresh
+   {
+     "refreshToken": "uuid-token"
+   }
+4. AuthService valida y genera nuevo access token
+5. Frontend recibe nuevo token y lo guarda
+
+================================================================================
+4. ESTRUCTURA DE CAPAS
+================================================================================
+
+CAPA 1: PRESENTACIÓN (Controllers)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ubicación: controller/
+
+AuthController (@RestController)
+├─ POST /api/auth/login
+│  └─> Recibe LoginRequest, retorna JwtResponse
+├─ POST /api/auth/refresh
+│  └─> Recibe RefreshTokenRequest, retorna nuevo JWT
+└─ POST /api/auth/logout
+   └─> Invalida refresh tokens
+
+AdminController (@RestController, @PreAuthorize("hasRole('ADMIN')"))
+├─ GET /api/admin/users?page=0&size=10&sortBy=id&sortDir=ASC
+│  └─> Retorna Page<UserDTO>
+└─ GET /api/admin/audit-logs?page=0&size=10&sortBy=id&sortDir=ASC
+   └─> Retorna Page<AuditLogDTO>
+
+UserController (@RestController)
+└─ GET /api/users/{id}
+   └─> Retorna UserDTO (usuario autenticado)
+
+
+CAPA 2: LÓGICA DE NEGOCIO (Services)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ubicación: service/
+
+AuthService
+├─ Responsabilidad: Manejar autenticación
+├─ Métodos:
+│  ├─ login(LoginRequest) - Autentica usuario, genera JWT
+│  ├─ refreshToken(String) - Genera nuevo access token
+│  ├─ logout(String) - Invalida refresh tokens
+│  └─ createRefreshToken(Long) - Crea nuevo refresh token
+└─ Características:
+   ├─ @Transactional - Maneja transacciones BD
+   └─ Registra auditoría de login/logout
+
+UserService
+├─ Responsabilidad: Lógica de usuarios
+├─ Métodos:
+│  ├─ getAllUsers(Pageable) - Obtiene todos con paginación
+│  ├─ getUserById(Long) - Obtiene uno por ID
+│  ├─ getUserByUsername(String) - Busca por username
+│  ├─ getEnabledUsers(Pageable) - Solo usuarios activos
+│  └─ createUser(UserDTO) - Crea nuevo usuario
+└─ Usa: UserRepository, UserMapper
+
+AuditLogService
+├─ Responsabilidad: Registrar acciones de usuarios
+├─ Métodos:
+│  ├─ logAction(username, action, entity, ...) - Registra acción
+│  └─ getAllAuditLogs(Pageable) - Obtiene logs con paginación
+└─ Usa: AuditLogRepository, AuditLogMapper
+
+
+CAPA 3: ACCESO A DATOS (Repositories)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ubicación: repository/
+
+UserRepository extends JpaRepository<User, Long>
+├─ Spring genera CRUD automáticamente
+├─ Métodos custom:
+│  ├─ Optional<User> findByUsername(String)
+│  ├─ Optional<User> findByEmail(String)
+│  ├─ boolean existsByUsername(String)
+│  ├─ boolean existsByEmail(String)
+│  ├─ Page<User> findByRole(Role, Pageable)
+│  └─ Page<User> findAllEnabled(Pageable) - @Query custom
+└─ JPQL: "SELECT u FROM User u WHERE u.enabled = true"
+
+RefreshTokenRepository extends JpaRepository<RefreshToken, Long>
+├─ Optional<RefreshToken> findByToken(String)
+├─ void deleteByUserId(Long)
+└─ void deleteByExpiryDateBefore(LocalDateTime)
+
+AuditLogRepository extends JpaRepository<AuditLog, Long>
+├─ Page<AuditLog> findAll(Pageable)
+└─ Page<AuditLog> findByUsername(String, Pageable)
+
+
+CAPA 4: SEGURIDAD (Security Components)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ubicación: security/
+
+JwtTokenProvider (@Component)
+├─ Responsabilidad: Crear y validar JWT
+├─ Métodos:
+│  ├─ generateToken(Authentication) - Crea JWT
+│  ├─ generateTokenFromUsername(String, Long, String) - Genera desde datos
+│  ├─ getUserIdFromToken(String) - Extrae userId del JWT
+│  ├─ getValidationStatus(String) - Valida y retorna estado
+│  └─ validateToken(String) - Valida firma
+├─ Usa: JJWT library + HMAC-SHA256
+└─ Propiedades:
+   ├─ jwt.secret = clave de firma (64 caracteres)
+   ├─ jwt.expiration = 24 horas (86400000 ms)
+   └─ jwt.refresh-expiration = 7 días (604800000 ms)
+
+JwtAuthenticationFilter extends OncePerRequestFilter
+├─ Responsabilidad: Intercepta requests y valida JWT
+├─ Método: doFilterInternal(HttpServletRequest, ..., FilterChain)
+│  ├─ Extrae JWT del header "Authorization: Bearer xxx"
+│  ├─ Valida JWT
+│  ├─ Carga UserDetails de BD
+│  ├─ Crea Authentication token
+│  └─ Lo guarda en SecurityContextHolder
+└─ Se ejecuta 1 vez por request (OncePerRequestFilter)
+
+JwtAuthenticationEntryPoint implements AuthenticationEntryPoint
+├─ Responsabilidad: Maneja errores de autenticación
+├─ Retorna JSON con error
+└─ Evita redireccionamiento a login page
+
+UserPrincipal implements UserDetails
+├─ Responsabilidad: Adapta User entity a Spring Security
+├─ Contiene:
+│  ├─ id, username, email, password
+│  ├─ authorities (roles como GrantedAuthority)
+│  ├─ enabled, accountNonExpired, accountNonLocked, ...
+│  └─ Métodos: getUsername(), getPassword(), getAuthorities()
+└─ Se crea en CustomUserDetailsService
+
+CustomUserDetailsService implements UserDetailsService
+├─ Responsabilidad: Carga UserDetails para autenticación
+├─ Métodos:
+│  ├─ loadUserByUsername(String) - Busca por username
+│  ├─ loadUserById(Long) - Busca por ID (para JWT)
+│  └─ Retorna UserPrincipal
+└─ Lo llama: JwtAuthenticationFilter y AuthenticationManager
+
+
+CAPA 5: CONFIGURACIÓN (Config)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ubicación: config/
+
+SecurityConfig (@Configuration)
+├─ passwordEncoder() Bean
+│  └─ BCryptPasswordEncoder (hashing de contraseñas)
+├─ authenticationProvider() Bean
+│  ├─ DaoAuthenticationProvider
+│  ├─ Usa CustomUserDetailsService
+│  └─ Usa BCryptPasswordEncoder
+├─ authenticationManager() Bean
+│  └─ Maneja autenticación
+├─ corsConfigurationSource() Bean
+│  ├─ Permite requests desde http://localhost:4200
+│  ├─ Métodos: GET, POST, PUT, DELETE, OPTIONS, PATCH
+│  └─ Headers: * (todos)
+└─ filterChain() Bean
+   ├─ Define qué requests requieren autenticación
+   ├─ Añade JwtAuthenticationFilter
+   ├─ Configura CSRF deshabilitado
+   └─ Establece SessionCreationPolicy.STATELESS (sin sesiones)
+
+AuditingConfig (@Configuration)
+├─ auditorProvider() Bean
+│  ├─ Implementa AuditorAware<String>
+│  ├─ Obtiene username del SecurityContextHolder
+│  ├─ Retorna "SYSTEM" si no autenticado
+│  └─ Llena createdBy/updatedBy automáticamente
+└─ Usado por @CreatedBy y @LastModifiedBy
+
+OpenAPIConfig (@Configuration)
+├─ Configura Swagger/OpenAPI documentation
+├─ Define info: título, descripción, versión
+├─ Configura seguridad: Bearer Token
+└─ Endpoints visibles en /swagger-ui.html y /v3/api-docs
+
+
+CAPA 6: MAPEO DE DATOS (DTOs y Mappers)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ubicación: dto/ y mapper/
+
+DTOs (Data Transfer Objects):
+├─ UserDTO - Data a enviar al frontend (sin password!)
+├─ AuditLogDTO - Logs para mostrar
+├─ LoginRequest - Credenciales del usuario
+├─ JwtResponse - Tokens de respuesta
+├─ RefreshTokenRequest - Solicitud de nuevo token
+└─ ApiResponse - Respuesta genérica
+
+UserMapper (MapStruct)
+├─ @Mapper(componentModel = "spring")
+├─ Métodos:
+│  ├─ UserDTO toDTO(User) - Entity -> DTO
+│  └─ List<UserDTO> toDTOList(List<User>)
+└─ Genera implementación automáticamente
+
+Ventaja de DTOs:
+✓ No exponemos User entity directamente
+✓ Oculta password y campos sensibles
+✓ Desacoplamiento entre capas
+✓ Validación clara de entrada/salida
+
+
+================================================================================
+5. EXPLICACIÓN DETALLADA DE CADA COMPONENTE
+================================================================================
+
+─── ENTITIES (Modelos de BD) ───
+
+User.java
+┌────────────────────────────────────────────────────────────────┐
+│ @Entity @Table(name = "users", indexes = {...})               │
+│                                                                │
+│ COLUMNAS:                                                      │
+│ - id: Long (PK, auto-generado)                               │
+│ - username: String (UNIQUE, NO NULL) - nombre de usuario     │
+│ - password: String - hash BCrypt de la contraseña            │
+│ - role: Enum (USER/ADMIN) - rol del usuario                 │
+│ - email: String - correo electrónico                        │
+│ - firstName, lastName: String - nombre completo             │
+│ - enabled: Boolean - cuenta activa/inactiva                 │
+│ - accountNonExpired: Boolean - cuenta no expirada           │
+│ - accountNonLocked: Boolean - cuenta no bloqueada           │
+│ - credentialsNonExpired: Boolean - credenciales no expiradas│
+│ - refreshTokens: List<RefreshToken> - tokens activos        │
+│ - auditLogs: List<AuditLog> - acciones registradas          │
+│ - createdAt, updatedAt: LocalDateTime - timestamps           │
+│ - createdBy, updatedBy: String - quién hizo cambios         │
+│                                                                │
+│ RELACIONES:                                                    │
+│ - @OneToMany(mappedBy = "user") refreshTokens               │
+│   └─> Un usuario tiene varios refresh tokens                 │
+│ - @OneToMany(mappedBy = "user") auditLogs                   │
+│   └─> Un usuario tiene varios audit logs                    │
+│                                                                │
+│ MÉTODOS:                                                       │
+│ - getFullName(): String - combina firstName + lastName       │
+└────────────────────────────────────────────────────────────────┘
+
+AuditableEntity.java (Superclase)
+┌────────────────────────────────────────────────────────────────┐
+│ @MappedSuperclass                                              │
+│ @EntityListeners(AuditingEntityListener.class)               │
+│                                                                │
+│ PROPÓSITO: Proporciona auditoría automática a todas las     │
+│ entidades que la extiendan (User, AuditLog, etc.)            │
+│                                                                │
+│ COLUMNAS AUDITORÍA:                                           │
+│ - @CreatedDate createdAt - cuándo se creó                   │
+│ - @LastModifiedDate updatedAt - cuándo se modificó          │
+│ - @CreatedBy createdBy - quién lo creó (username)           │
+│ - @LastModifiedBy updatedBy - quién lo modificó             │
+│                                                                │
+│ HOOKS DE LIFECYCLE:                                           │
+│ - @PrePersist onCreate() - se ejecuta antes de insertar      │
+│ - @PreUpdate onUpdate() - se ejecuta antes de actualizar     │
+│                                                                │
+│ VENTAJA: No escribir auditoría en cada entidad               │
+└────────────────────────────────────────────────────────────────┘
+
+RefreshToken.java
+┌────────────────────────────────────────────────────────────────┐
+│ @Entity @Table(name = "refresh_tokens")                        │
+│                                                                │
+│ COLUMNAS:                                                      │
+│ - id: Long (PK)                                              │
+│ - token: String (UNIQUE) - UUID token                        │
+│ - userId: Long (FK) - referencia a User                      │
+│ - expiryDate: LocalDateTime - cuándo expira                 │
+│ - createdAt: LocalDateTime - timestamp de creación           │
+│                                                                │
+│ RELACIÓN:                                                      │
+│ - @ManyToOne user: User                                       │
+│   └─> Muchos tokens pertenecen a un usuario                  │
+│                                                                │
+│ PROPÓSITO:                                                     │
+│ ✓ Permite renovar access token sin re-autenticar             │
+│ ✓ Tokens de larga duración (7 días) vs access (24 horas)    │
+│ ✓ Se invalidan en logout                                    │
+│ ✓ Se eliminan si expiran                                    │
+└────────────────────────────────────────────────────────────────┘
+
+AuditLog.java
+┌────────────────────────────────────────────────────────────────┐
+│ @Entity @Table(name = "audit_logs")                            │
+│                                                                │
+│ COLUMNAS:                                                      │
+│ - id: Long (PK)                                              │
+│ - username: String - quién ejecutó la acción                 │
+│ - action: String - LOGIN, CREATE, UPDATE, DELETE             │
+│ - entityType: String - qué tipo (User, AuditLog)            │
+│ - entityId: Long - ID del objeto modificado                 │
+│ - details: String (Text) - detalles adicionales             │
+│ - ipAddress: String - IP del cliente                        │
+│ - createdAt: LocalDateTime - cuándo pasó                    │
+│                                                                │
+│ PROPÓSITO: Rastrear todas las acciones para auditoría        │
+│ - Quién hizo qué                                             │
+│ - Cuándo lo hizo                                             │
+│ - Desde qué IP                                               │
+│ - Qué cambios se hicieron                                    │
+│                                                                │
+│ CASOS DE USO:                                                 │
+│ - Compliance y regulación                                    │
+│ - Detectar accesos no autorizados                           │
+│ - Recuperar cambios pasados                                 │
+│ - Reportes de actividad                                     │
+└────────────────────────────────────────────────────────────────┘
+
+
+─── DATABASE MIGRATIONS (Flyway) ───
+
+V1__Create_users_table.sql
+├─ Crea tabla: users
+│  ├─ Esquema: username, password, role, email, etc.
+│  ├─ Índices: idx_users_username, idx_users_email, idx_users_role
+│  └─ Inserta 2 usuarios de prueba (user y admin con BCrypt hash)
+│
+├─ Crea tabla: refresh_tokens
+│  ├─ Esquema: token, user_id, expiry_date
+│  ├─ Foreign Key: user_id → users(id) con ON DELETE CASCADE
+│  └─ Índices: idx_refresh_tokens_user_id, idx_refresh_tokens_token
+│
+└─ Propósito: Versionado de BD
+   ├─ Cada cambio es una nueva versión (V1, V2, V3...)
+   ├─ Se ejecutan automáticamente en startup
+   ├─ Idempotentes (se pueden ejecutar muchas veces)
+   └─ Facilita rollback y reproducibilidad
+
+V2__Create_audit_log_table.sql
+├─ Crea tabla: audit_logs
+├─ Esquema: username, action, entityType, entityId, details, ipAddress, createdAt
+└─ Propósito: Almacenar historial de auditoría
+
+
+─── VALIDATION Y ERROR HANDLING ───
+
+GlobalExceptionHandler (@RestControllerAdvice)
+├─ @ExceptionHandler atrapa excepciones globalmente
+├─ Retorna respuestas JSON consistentes
+├─ Casos:
+│  ├─ ResourceNotFoundException → 404
+│  ├─ BadRequestException → 400
+│  ├─ BadCredentialsException → 401 (credenciales inválidas)
+│  ├─ AccessDeniedException → 403 (sin permisos)
+│  └─ MethodArgumentNotValidException → 400 (validación fallida)
+└─ Estructura de respuesta:
+   {
+     "timestamp": "2024-01-06T10:30:00",
+     "status": 401,
+     "message": "Invalid username or password",
+     "path": "uri=/api/auth/login"
+   }
+
+Bean Validation (@Valid)
+├─ @NotBlank - no puede ser vacío
+├─ @Email - debe ser email válido
+├─ @Min/@Max - rangos numéricos
+└─ Se aplica en DTOs (LoginRequest, RefreshTokenRequest)
+
+
+================================================================================
+6. CÓMO EXPLICARLO EN UNA ENTREVISTA
+================================================================================
+
+ESTRUCTURA RECOMENDADA DE EXPLICACIÓN:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1️⃣ PITCH INICIAL (30 segundos)
+
+"He construido un backend empresarial con Spring Boot 3.2 que es una
+aplicación J2EE (Java Enterprise Edition). Es una arquitectura de capas
+con autenticación JWT stateless, integrada con PostgreSQL y con auditoría
+automática de cambios. Los usuarios se pueden loguear, obtienen un JWT,
+y luego acceden a endpoints protegidos con control de roles."
+
+
+2️⃣ ARQUITECTURA DE CAPAS (1-2 minutos)
+
+"La estructura sigue un patrón de capas:
+
+- PRESENTACIÓN: Controllers que exponen los endpoints REST
+  AuthController para login/logout/refresh
+  AdminController para operaciones admin (solo ROLE_ADMIN puede acceder)
+
+- LÓGICA DE NEGOCIO: Services que contienen la lógica
+  AuthService maneja autenticación y generación de JWT
+  UserService accede a datos de usuarios
+  AuditLogService registra acciones
+
+- ACCESO A DATOS: Repositories que hablan con la BD
+  Extienden JpaRepository para CRUD automático
+  Tienen queries custom con @Query
+
+- SEGURIDAD: Componentes especiales
+  JwtTokenProvider que crea y valida JWTs
+  JwtAuthenticationFilter que intercepta requests
+  CustomUserDetailsService que carga usuarios
+
+- CONFIGURACIÓN: Beans de Spring
+  SecurityConfig que define la política de seguridad
+  AuditingConfig que proporciona auditoría automática"
+
+
+3️⃣ FLUJO DE AUTENTICACIÓN (2-3 minutos)
+
+"El flujo de login es así:
+
+1. El usuario envía username/password a POST /api/auth/login
+
+2. AuthService valida con AuthenticationManager:
+   - Busca el usuario en BD por username
+   - Usa BCryptPasswordEncoder para comparar contraseñas
+   - Si es correcto, crea un objeto Authentication
+
+3. JwtTokenProvider genera un JWT:
+   - Incluye el userId como subject
+   - Incluye username y roles como claims
+   - Está firmado con HMAC-SHA256
+   - Expira en 24 horas
+   - Se calcula con: exp = now + 86400000 ms
+
+4. Se crea un Refresh Token:
+   - UUID aleatorio guardado en BD
+   - Expira en 7 días
+   - Sirve para generar nuevo access token sin re-autenticar
+
+5. AuditService registra el LOGIN en la tabla audit_logs
+
+6. Se devuelve al cliente:
+   {accessToken, refreshToken, userId, username, roles}
+
+7. El cliente guarda en localStorage
+
+Luego, para requests protegidos:
+1. Cliente envía: Authorization: Bearer <jwt>
+2. JwtAuthenticationFilter lo intercepta
+3. Valida la firma del JWT
+4. Extrae userId del subject
+5. Carga UserDetails de la BD
+6. Crea Authentication token
+7. Guarda en SecurityContextHolder
+8. Request procede normalmente"
+
+
+4️⃣ SEGURIDAD Y PROTECCIONES (1-2 minutos)
+
+"Las medidas de seguridad son:
+
+AUTENTICACIÓN:
+- Contraseñas hasheadas con BCrypt (no reversible)
+- JWTs firmados criptográficamente
+- Refresh tokens rotatorios (7 días)
+
+AUTORIZACIÓN:
+- @PreAuthorize("hasRole('ADMIN')") en endpoints sensibles
+- SecurityContextHolder verifica roles antes de ejecutar
+
+STATELESS:
+- SessionCreationPolicy.STATELESS
+- No se usan sesiones en servidor
+- Todo en tokens JWT
+
+CORS:
+- Solo requests desde http://localhost:4200
+- Headers específicos permitidos
+- Previene ataques cross-site
+
+VALIDACIÓN:
+- Bean Validation en DTOs
+- GlobalExceptionHandler captura errores
+- Mensajes de error genéricos (no expone detalles)"
+
+
+5️⃣ AUDITORÍA (1 minuto)
+
+"Para auditoría tengo:
+
+ENTIDADES CON AUDITORÍA:
+- Todas extienden AuditableEntity
+- Automáticamente cuelgan: createdAt, updatedAt, createdBy, updatedBy
+- Se actualiza automáticamente gracias a @EntityListeners
+
+TABLA AUDIT_LOGS:
+- Registra cada acción: LOGIN, CREATE, UPDATE, DELETE
+- Quién: username
+- Qué: entityType + entityId
+- Cuándo: timestamp
+- Desde dónde: ipAddress
+- Detalles adicionales
+
+AuditorAware Bean:
+- Extrae el username del SecurityContextHolder
+- Lo asigna automáticamente a createdBy/updatedBy
+- Si no está autenticado, pone 'SYSTEM'"
+
+
+6️⃣ BASE DE DATOS (1 minuto)
+
+"Uso PostgreSQL con Hibernate/JPA:
+
+ESTRUCTURA:
+- Tabla users: username (UNIQUE), password, role, email, etc.
+- Tabla refresh_tokens: token UUID, user_id (FK), expiryDate
+- Tabla audit_logs: username, action, entityType, entityId, createdAt, ipAddress
+
+MIGRATIONS:
+- Flyway maneja versionado de esquema
+- V1: crea users y refresh_tokens
+- V2: crea audit_logs
+- Se ejecutan automáticamente en startup
+
+ÍNDICES:
+- idx_users_username - para búsquedas rápidas por username
+- idx_users_email - para búsquedas por email
+- idx_users_role - para filtrar por rol
+- Mejoran performance en queries comunes
+
+CONNECTION POOL:
+- HikariCP mantiene 5-10 conexiones
+- Reutiliza conexiones eficientemente
+- Timeout y lifecycle management automático"
+
+
+7️⃣ MAPEO DE DATOS (30 segundos)
+
+"Para desacople de capas uso DTOs:
+
+USER ENTITY (en BD):
+- Contiene password (nunca se envía)
+- Datos sensibles internos
+
+USER DTO (enviado al cliente):
+- Solo campos públicos
+- Sin password
+- Seguro de enviar por API
+
+MAPSTRUCT:
+- Mapeo automático Entity ↔ DTO
+- Genera código en compile-time
+- No reflection en runtime (rápido)"
+
+
+PREGUNTAS TÍPICAS Y RESPUESTAS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+P: ¿Por qué JWT en lugar de sesiones?
+R: Los JWTs son stateless. El servidor no necesita almacenar sesiones,
+   lo que facilita escalabilidad horizontal. Cada request es autónomo.
+   El cliente lleva toda la info de autenticación en el token.
+
+P: ¿Cómo se protege el JWT?
+R: Se firma con HMAC-SHA256 usando una clave secreta en el servidor.
+   Si alguien intenta modificar el payload, la firma ya no coincide.
+   Además, expira en 24 horas.
+
+P: ¿Qué pasa si se roba un JWT?
+R: Es un riesgo. Por eso se transmite sobre HTTPS (en producción).
+   Por eso expira rápido (24 horas).
+   Por eso hay refresh tokens separados para renovar.
+   En logout invalida refresh tokens en BD.
+
+P: ¿Cómo funciona el refresh token?
+R: El access token expira en 24 horas. Si el usuario aún está activo,
+   puede usar el refresh token para obtener uno nuevo sin volver a
+   autenticar. El refresh token tiene 7 días de validez.
+
+P: ¿Por qué BCrypt para contraseñas?
+R: BCrypt es un algoritmo adaptable con salt aleatorio. Es lento a propósito
+   (computacionalmente costoso), lo que dificulta ataques de fuerza bruta.
+   Nunca se pueden recuperar las contraseñas originales.
+
+P: ¿Cómo maneja la auditoría?
+R: AuditableEntity proporciona createdAt, createdBy, updatedAt, updatedBy.
+   AuditorAware Bean extrae el username del SecurityContextHolder.
+   AuditLog tabla registra acciones específicas (LOGIN, UPDATE, DELETE).
+   Todo automático sin código boilerplate.
+
+P: ¿Cómo escalas esto?
+R: Por ser stateless con JWT:
+   - Múltiples instancias sin compartir sesiones
+   - Load balancer puede enviar requests a cualquier instancia
+   - BD debe ser compartida (PostgreSQL en servidor común)
+   - Redis para cache si hay mucho tráfico
+
+P: ¿Y si la contraseña es débil?
+R: Bean Validation puede validar según reglas.
+   Pero aquí solo tenemos login.
+   En producción: requerir mayúsculas, números, símbolos, min 8 chars.
+
+P: ¿Cómo funciona @PreAuthorize?
+R: Spring Security evalúa la expresión SPEL.
+   "hasRole('ADMIN')" busca 'ROLE_ADMIN' en authorities del usuario.
+   Si no está, retorna 403 Forbidden antes de ejecutar el método.
+
+P: ¿Qué es MapStruct?
+R: Framework que genera mappers Entity ↔ DTO en compile-time.
+   No usa reflection, es muy rápido.
+   Configurable con @Mapping para rename/transform.
+
+P: ¿OncePerRequestFilter vs Filter?
+R: OncePerRequestFilter garantiza que se ejecuta exactamente 1 vez por request.
+   Filter normal podría ejecutarse múltiples veces si hay forward/include.
+   Importante para JWT porque queremos validar una sola vez.
+
+P: ¿Cómo es el flujo de error?
+R: Exception ocurre en un endpoint.
+   GlobalExceptionHandler @ExceptionHandler la captura.
+   Retorna ResponseEntity con ErrorResponse JSON.
+   Cliente recibe status code (404, 401, 400, etc.) y mensaje.
+
+P: ¿Transacciones @Transactional?
+R: Login usa @Transactional porque hace múltiples operaciones:
+   - Autentica (lee BD)
+   - Genera JWT
+   - Crea RefreshToken (escribe BD)
+   - Registra AuditLog (escribe BD)
+   Si algo falla, todo se revierte (rollback).
+
+================================================================================
+7. CONSIDERACIONES IMPORTANTES PARA LA ENTREVISTA
+================================================================================
+
+✅ PUNTOS FUERTES A DESTACAR:
+
+1. ARQUITECTURA ESCALABLE
+   - Capas bien separadas
+   - Fácil de testear
+   - Fácil de añadir nuevas funcionalidades
+
+2. SEGURIDAD ROBUSTA
+   - JWT con firma criptográfica
+   - Contraseñas hasheadas con BCrypt
+   - Control de roles con @PreAuthorize
+   - CORS configurado
+
+3. AUDITORÍA COMPLETA
+   - AuditableEntity automática
+   - Tabla AuditLog con detalles
+   - Trazabilidad total de cambios
+
+4. PATRONES SPRING BOOT
+   - Dependency injection correcto
+   - Uso de DTOs para desacople
+   - MapStruct para mapeo
+   - GlobalExceptionHandler
+
+5. BASE DE DATOS PROFESIONAL
+   - Migrations con Flyway
+   - Índices para performance
+   - Connection pooling con HikariCP
+   - Relaciones bien modeladas
+
+6. DOCUMENTACIÓN
+   - Swagger/OpenAPI automático
+   - Anotaciones @Operation, @Tag
+
+⚠️ PUNTOS A ESTAR PREPARADO:
+
+- Diferencia entre JWT y sesiones
+- Cómo funciona BCrypt
+- Por qué @Transactional
+- Diferencia Entity vs DTO
+- Cómo se escala (stateless)
+- Security Context y Authentication
+- CORS y cross-site requests
+
+🎯 SI PREGUNTAN SOBRE MEJORAS:
+
+- Unit tests con JUnit + Mockito
+- Integration tests con @SpringBootTest
+- Rate limiting para evitar ataques
+- 2FA (Two-Factor Authentication)
+- Encriptación de datos sensibles
+- Logging y monitoring (ELK stack)
+- API versioning (/api/v1/users, /api/v2/users)
+- GraphQL como alternativa a REST
+
+================================================================================
+RESUMEN RÁPIDO PARA MEMORIZAR
+================================================================================
+
+COMPONENTES CLAVE:
+┌─────────────────────────────────────────────────────────────┐
+│ 1. User Entity - objeto principal, campos auditables        │
+│ 2. JwtTokenProvider - genera y valida JWTs                  │
+│ 3. JwtAuthenticationFilter - valida JWTs en cada request    │
+│ 4. AuthService - lógica de login/logout/refresh             │
+│ 5. SecurityConfig - configura Spring Security               │
+│ 6. AuditableEntity - proporciona createdAt/createdBy auto   │
+│ 7. AuditLog - registra todas las acciones                   │
+│ 8. DTO + MapStruct - desacople y seguridad                 │
+│ 9. Repositories - acceso a datos con Spring Data JPA        │
+│ 10. GlobalExceptionHandler - manejo de errores              │
+└─────────────────────────────────────────────────────────────┘
+
+FLUJO MEMORIZABLE:
+
+LOGIN:    Credenciales → AuthService → JWT + Refresh Token → Response
+
+PROTEGIDO: Authorization Header → JwtAuthenticationFilter → JWT válido
+           → UserDetails en SecurityContext → @PreAuthorize
+           → Endpoint ejecuta
+
+REFRESH:  Refresh Token → AuthService → Nuevo Access Token → Response
+
+AUDITORÍA: Toda acción → AuditLog registra → Con username, IP, acción
+
+SEGURIDAD: BCrypt password + JWT firmado + CORS + Roles + Transacciones
+
+================================================================================
+FIN DE LA DOCUMENTACIÓN
+================================================================================
+
+Última actualización: Enero 2026
+Versión del Backend: 1.0.0
+Spring Boot: 3.2.1
+Java: 17
+
+Recuerda: ¡Practica explicar esto en voz alta para la entrevista!

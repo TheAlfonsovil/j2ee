@@ -1,0 +1,73 @@
+<div class="login-container">
+  <div class="login-card card">
+    <div class="login-header">
+      <h1>J2EE Demo Application</h1>
+      <p>Enterprise-grade authentication system</p>
+    </div>
+
+    <form (ngSubmit)="onSubmit()" #loginForm="ngForm">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          [(ngModel)]="credentials.username"
+          required
+          placeholder="Enter your username"
+          [disabled]="isLoading"
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          [(ngModel)]="credentials.password"
+          required
+          placeholder="Enter your password"
+          [disabled]="isLoading"
+        />
+      </div>
+
+      <div *ngIf="errorMessage" class="error-message">
+        {{ errorMessage }}
+      </div>
+
+      <button
+        type="submit"
+        class="login-button primary"
+        [disabled]="isLoading || !loginForm.form.valid"
+      >
+        <span *ngIf="!isLoading">Login</span>
+        <span *ngIf="isLoading">Logging in...</span>
+      </button>
+    </form>
+
+    <div class="demo-credentials">
+      <p>Demo Credentials:</p>
+      <div class="demo-buttons">
+        <button type="button" (click)="fillUserCredentials()" class="secondary">
+          Fill User (user/1234)
+        </button>
+        <button type="button" (click)="fillAdminCredentials()" class="secondary">
+          Fill Admin (admin/1234)
+        </button>
+      </div>
+    </div>
+
+    <div class="features">
+      <h3>Features Implemented:</h3>
+      <ul>
+        <li>✓ JWT Authentication with Refresh Tokens</li>
+        <li>✓ Role-based Access Control (RBAC)</li>
+        <li>✓ Spring Security + Hibernate + PostgreSQL</li>
+        <li>✓ RESTful API with OpenAPI/Swagger</li>
+        <li>✓ Audit Logging & User Tracking</li>
+        <li>✓ Angular Guards & HTTP Interceptors</li>
+      </ul>
+    </div>
+  </div>
+</div>
